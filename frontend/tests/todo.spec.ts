@@ -87,4 +87,105 @@ test.describe('Todo Page', () => {
         await page.getByPlaceholder('Name').fill('Both Provided');
         await expect(addButton).toBeEnabled();
     });
+
+    test('should update a todo to complete and hide the Complete button', async ({ page }) => {
+        const initialTodo = {
+            id: 'todo-1',
+            name: 'Finish tests',
+            description: 'Write backend and frontend tests',
+            status: false,
+        }
+        const completedTodo = {
+            ...initialTodo,
+            status: true,
+        }
+        let updated = false
+
+        await page.route('**/api/v1/todos**', async (route) => {
+            const method = route.request().method()
+            if (method === 'GET') {
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ todos: [updated ? completedTodo : initialTodo] }),
+                })
+                return
+            }
+
+            if (method === 'PUT') {
+                updated = true
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ todo: completedTodo }),
+                })
+                return
+            }
+
+            await route.continue()
+        });
+
+        await page.goto(BASE_URL);
+
+        const completeButton = page.getByRole('button', { name: 'Complete' })
+        await expect(completeButton).toBeVisible()
+
+        await completeButton.click()
+
+        const updatedHeading = page.getByRole('heading', { name: 'Finish tests' })
+        await expect(updatedHeading).toHaveClass(/line-through/)
+        await expect(completeButton).toBeHidden()
+    });
+
+    test('should delete a todo and remove it from the list', async ({ page }) => {
+        const initialTodos = [
+            {
+                id: 'todo-1',
+                name: 'Task 1',
+                description: 'Description 1',
+                status: false,
+            },
+            {
+                id: 'todo-2',
+                name: 'Task 2',
+                description: 'Description 2',
+                status: false,
+            }
+        ]
+        let todos = [...initialTodos]
+
+        await page.route('**/api/v1/todos**', async (route) => {
+            const method = route.request().method()
+            const url = route.request().url()
+            if (method === 'GET') {
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ todos }),
+                })
+            } else if (method === 'DELETE') {
+                const id = url.split('/').pop()
+                todos = todos.filter(todo => todo.id !== id)
+                await route.fulfill({
+                    status: 204,
+                    contentType: 'application/json',
+                    body: '',
+                })
+            }
+        });
+
+        await page.goto(BASE_URL);
+
+        // Verify both todos are present
+        await expect(page.getByRole('heading', { name: 'Task 1' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Task 2' })).toBeVisible();
+
+        // Click delete on first todo
+        const deleteButton = page.locator('.Card').first().getByRole('button', { name: 'Delete' });
+        await deleteButton.click();
+
+        // Verify only second todo remains
+        await expect(page.getByRole('heading', { name: 'Task 1' })).not.toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Task 2' })).toBeVisible();
+    });
 });
